@@ -15,6 +15,7 @@ import os, re, secrets
 from pathlib import Path
 from typing import List, Dict, Tuple
 from flask import Flask, request, render_template_string, session, redirect, url_for
+from flask_session import Session
 
 # Kleine .env loader (zonder extra dependency)
 def load_env_if_exists(path: str = ".env") -> None:
@@ -45,7 +46,14 @@ RAG_MODEL    = os.getenv("RAG_MODEL", "llama-3.3-70b-versatile")
 TOP_K        = int(os.getenv("RAG_TOPK", "5"))
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(16))
+app.config.update(
+    SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
+    SESSION_TYPE="filesystem",
+    SESSION_PERMANENT=False,
+    SESSION_FILE_DIR=str(Path("./.flask_session").resolve()),
+)
+Path("./.flask_session").mkdir(parents=True, exist_ok=True)
+Session(app)
 
 HTML = r"""
 <!doctype html>
