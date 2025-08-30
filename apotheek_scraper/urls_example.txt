@@ -1,0 +1,7 @@
+# Voorbeeldlijst met medicijn-URLs (één per regel)
+https://www.apotheek.nl/medicijnen/paracetamol
+https://www.apotheek.nl/medicijnen/ibuprofen
+https://www.apotheek.nl/medicijnen/metoprolol
+https://www.apotheek.nl/medicijnen/candesartan
+https://www.apotheek.nl/medicijnen/amitriptyline
+https://www.apotheek.nl/medicijnen/venlafaxine

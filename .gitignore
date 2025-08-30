@@ -1,1 +1,48 @@
-.venv/*
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dylib
+*.egg-info/
+dist/
+build/
+
+# --- Virtual envs ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- IDE / OS noise ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs / cache ---
+*.log
+.cache/
+.cache_dir/
+
+# --- Project data (niet committen) ---
+data/raw_html/
+data/clean_json/
+data/vectordb/
+data/cache/
+data/logs/
+*.faiss
+*.jsonl
+
+# Laat placeholders in repo toe
+!data/**/.gitkeep
+!data/**/README.md
+
+# --- Env files (nooit committen) ---
+.env
+.env.*
+!.env.example
