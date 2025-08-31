@@ -17,4 +17,4 @@ COPY . /app
 ENV VECTORDB_DIR=/app/data/vectordb
 
 # Spaces levert $PORT; bind daar op
-CMD ["gunicorn", "-k", "gthread", "-w", "1", "-b", "0.0.0.0:${PORT}", "app:app"]
+CMD ["sh", "-c", "gunicorn -k gthread -w 1 -b 0.0.0.0:${PORT:-7860} app:app"]
