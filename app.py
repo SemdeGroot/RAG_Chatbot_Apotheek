@@ -63,31 +63,41 @@ TOP_K = int(os.getenv("RAG_TOPK", "5"))
 # ----------------------
 app = Flask(__name__)
 
-# Probeer server-side sessies; val terug op cookie-sessies als Flask-Session ontbreekt
-
-# Herken of we op Hugging Face Spaces draaien
+# Herken HF Spaces (iframe => third-party cookies)
 IN_SPACES = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE"))
+SAMESITE  = "None" if IN_SPACES else "Lax"
+SECURE    = True   if IN_SPACES else False
 
-# Session-cookie geschikt maken voor iframe (HF): None + Secure
-SAMESITE = "None" if IN_SPACES else "Lax"
-SECURE   = True   if IN_SPACES else False
+try:
+    # Server-side sessies (aanrader)
+    from flask_session import Session
 
-# Server-side sessies in tempdir (werkt op HF)
-SESSION_DIR = Path(tempfile.gettempdir()) / "rag_apotheek_sessions"
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    SESSION_DIR = Path(tempfile.gettempdir()) / "rag_apotheek_sessions"
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
-app.config.update(
-    SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
-    SESSION_TYPE="filesystem",
-    SESSION_PERMANENT=False,
-    SESSION_FILE_DIR=str(SESSION_DIR),
-    SESSION_USE_SIGNER=True,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE=SAMESITE,
-    SESSION_COOKIE_SECURE=SECURE,
-)
+    app.config.update(
+        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
+        SESSION_TYPE="filesystem",
+        SESSION_PERMANENT=False,
+        SESSION_FILE_DIR=str(SESSION_DIR),
+        SESSION_USE_SIGNER=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE=SAMESITE,
+        SESSION_COOKIE_SECURE=SECURE,
+    )
+    Session(app)
+    print(f"[session] Filesystem sessions -> {SESSION_DIR}")
 
-Session(app)  # <— DIT activeert Flask-Session echt
+except Exception as e:
+    # Fallback: cookie-sessies (werkt niet altijd in iframe; zet dan USE_POST_REDIRECT=0)
+    app.config.update(
+        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
+        SESSION_USE_SIGNER=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE=SAMESITE,
+        SESSION_COOKIE_SECURE=SECURE,
+    )
+    print(f"⚠️ Flask-Session niet actief: {e}")
 
 # ----------------------
 # Frontend (moderne dark UI – geïnspireerd op je voorbeeld, zonder logo)
