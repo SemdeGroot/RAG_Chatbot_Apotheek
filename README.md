@@ -1,6 +1,12 @@
-# RAG_Apotheek
+---
+title: Apotheek Chatbot
+emoji: 💊
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
 
-Proof-of-concept **RAG** voor apotheek.nl-content:
-1) **Scrapen** → `_clean.json`
-2) **Embedden** → FAISS vector DB
-3) **Augmented Generation** → LLM antwoord met bronnen
+# Apotheek Chatbot (RAG)
+
+Een lichte **Flask** webapp die met **FAISS** + **Sentence Transformers** relevante passages uit enkele *apotheek.nl* teksten (lokaal geparseerd) ophaalt en via **Groq LLM** een beknopt NL-antwoord geeft. Ontworpen als Proof of Concept.
