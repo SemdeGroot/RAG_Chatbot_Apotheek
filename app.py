@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 from flask import Flask, request, render_template_string, session, redirect, url_for
 from urllib.parse import urlparse, urlunparse
+from flask_session import Session
 
 # ----------------------
 # .env loader (lichtgewicht)
@@ -63,9 +64,17 @@ TOP_K = int(os.getenv("RAG_TOPK", "5"))
 app = Flask(__name__)
 
 # Probeer server-side sessies; val terug op cookie-sessies als Flask-Session ontbreekt
-IN_SPACES = os.getenv("SPACE_ID") or os.getenv("HF_SPACE")  # aanwezig op HF
-SAMESITE  = "None" if IN_SPACES else "Lax"
-SECURE    = True   if IN_SPACES else False
+
+# Herken of we op Hugging Face Spaces draaien
+IN_SPACES = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE"))
+
+# Session-cookie geschikt maken voor iframe (HF): None + Secure
+SAMESITE = "None" if IN_SPACES else "Lax"
+SECURE   = True   if IN_SPACES else False
+
+# Server-side sessies in tempdir (werkt op HF)
+SESSION_DIR = Path(tempfile.gettempdir()) / "rag_apotheek_sessions"
+SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 app.config.update(
     SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
@@ -77,6 +86,8 @@ app.config.update(
     SESSION_COOKIE_SAMESITE=SAMESITE,
     SESSION_COOKIE_SECURE=SECURE,
 )
+
+Session(app)  # <— DIT activeert Flask-Session echt
 
 # ----------------------
 # Frontend (moderne dark UI – geïnspireerd op je voorbeeld, zonder logo)
@@ -378,58 +389,67 @@ def build_sources_from_hits(hits: List[Tuple[float, Dict]]) -> List[Dict]:
 
     return sources
 
-# ----------------------
-# Routes
-# ----------------------
+# ===== Routes & settings =====
+# Render direct na POST (aan), of gebruik PRG met redirect (uit)
+USE_POST_REDIRECT = os.getenv("USE_POST_REDIRECT", "0") == "1"
+CHAT_HISTORY_MAX  = int(os.getenv("CHAT_HISTORY_MAX", "20"))
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     chat = session.get("chat", [])
+
     if request.method == "POST":
         question = (request.form.get("question") or "").strip()
         if question:
             try:
-                # Retrieve
+                # 1) Retrieve
                 hits = retrieve(VECTORDB_DIR, question, k=TOP_K)
                 if not hits:
-                    answer = "Geen context gevonden in de vector database. Bouw eerst de index of pas je vraag aan."
+                    answer  = "Geen context gevonden in de vector database. Bouw eerst de index of pas je vraag aan."
                     sources = []
                 else:
-                    # Context + LLM
+                    # 2) Context + LLM
                     ctx_blocks = build_context_blocks(hits)
                     messages   = make_messages(question, ctx_blocks)
                     answer     = groq_chat(messages, model=RAG_MODEL, max_tokens=700, temperature=0.2, stream=False)
+
+                    # 3) Geen 'Bronnen:'-regels in de tekst (we tonen eigen bronnenlijst)
+                    answer = re.sub(r"(?im)^\s*bronnen\s*:.*$", "", answer).strip()
+
+                    # 4) Bronnenlijst: unieke URLs
                     sources = build_sources_from_hits(hits)
+
             except Exception as e:
-                answer = f"Er ging iets mis: {e}"
+                answer  = f"Er ging iets mis: {e}"
                 sources = []
 
-            # Voeg toe aan chat; cap om cookies te voorkomen als fallback actief is
-            if not HAVE_FLASK_SESSION:
-                MAX_ANS_CHARS = 1500
-                if len(answer) > MAX_ANS_CHARS:
-                    answer = answer[:MAX_ANS_CHARS] + "…"
-                chat.append({"q": question, "a": answer, "sources": sources})
-                chat = chat[-6:]  # bewaar alleen laatste 6 turns
-            else:
-                chat.append({"q": question, "a": answer, "sources": sources})
-                chat = chat[-20:] # royale, server-side
-
+            # 5) Chat bijwerken + cap
+            chat.append({"q": question, "a": answer, "sources": sources})
+            chat = chat[-CHAT_HISTORY_MAX:]
             session["chat"] = chat
-        return redirect(url_for("index"))
 
-    return render_template_string(
-        HTML,
-        chat=chat,
-    )
+        if USE_POST_REDIRECT:
+            return redirect(url_for("index"))
 
-@app.route("/clear")
+    # GET of direct render na POST
+    return render_template_string(HTML, chat=chat)
+
+@app.route("/clear", methods=["GET"])
 def clear():
-    session.pop("chat", None)
-    return redirect(url_for("index"))
+    session["chat"] = []
+    if USE_POST_REDIRECT:
+        return redirect(url_for("index"))
+    return render_template_string(HTML, chat=[])
 
 @app.route("/healthz")
 def healthz():
-    return {"ok": True, "db": str(VECTORDB_DIR), "top_k": TOP_K, "model": RAG_MODEL}
+    return {
+        "ok": True,
+        "db_dir": str(VECTORDB_DIR),
+        "has_index": (VECTORDB_DIR / "index.faiss").exists(),
+        "top_k": TOP_K,
+        "model": RAG_MODEL,
+    }
 
 # ----------------------
 # Main
