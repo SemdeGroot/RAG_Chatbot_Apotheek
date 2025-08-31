@@ -1,7 +1,13 @@
-# Voorbeeldlijst met medicijn-URLs (één per regel)
+# Voorbeeld URLs voor Proof of Concept
 https://www.apotheek.nl/medicijnen/paracetamol
 https://www.apotheek.nl/medicijnen/ibuprofen
 https://www.apotheek.nl/medicijnen/metoprolol
 https://www.apotheek.nl/medicijnen/candesartan
 https://www.apotheek.nl/medicijnen/amitriptyline
 https://www.apotheek.nl/medicijnen/venlafaxine
+https://www.apotheek.nl/medicijnen/metformine
+https://www.apotheek.nl/medicijnen/omeprazol
+https://www.apotheek.nl/medicijnen/amlodipine
+https://www.apotheek.nl/medicijnen/atorvastatine
+https://www.apotheek.nl/medicijnen/amoxicilline
+https://www.apotheek.nl/medicijnen/salbutamol-inhalatie

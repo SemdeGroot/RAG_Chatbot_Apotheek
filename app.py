@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """
-Flask RAG chatbot (GROQ) met donkere UI.
-- Leest je FAISS DB uit VECTORDB_DIR (default: data/vectordb)
-- Leest GROQ_API_KEY uit .env of omgeving (augmented_generation/providers/groq_client.py doet dit ook)
-- Chatgeschiedenis in Flask session (niet persistent)
+Flask RAG chatbot (GROQ) – moderne dark UI (zonder logo)
+
+- Leest FAISS DB uit VECTORDB_DIR (default: data/vectordb)
+- Leest GROQ_API_KEY uit .env of omgeving
+- Server-side sessies via Flask-Session (filesystem, tempdir) met nette fallback
+- Chat-history capped om oversized cookies te voorkomen als fallback actief is
 
 Run:
-  pip install flask groq sentence-transformers faiss-cpu
+  pip install flask Flask-Session groq sentence-transformers faiss-cpu
   python app.py
 """
 
 from __future__ import annotations
-import os, re, secrets
+import os, re, sys, secrets, tempfile
 from pathlib import Path
 from typing import List, Dict, Tuple
 from flask import Flask, request, render_template_string, session, redirect, url_for
-from flask_session import Session
+from urllib.parse import urlparse, urlunparse
 
-# Kleine .env loader (zonder extra dependency)
+# ----------------------
+# .env loader (lichtgewicht)
+# ----------------------
 def load_env_if_exists(path: str = ".env") -> None:
     p = Path(path)
     if not p.exists():
@@ -36,241 +40,358 @@ def load_env_if_exists(path: str = ".env") -> None:
 
 load_env_if_exists(".env")
 
-# Imports uit je bestaande modules
+# Zorg dat projectroot importeerbaar blijft, ook als je vanuit een andere map start
+sys.path.append(str(Path(__file__).parent.resolve()))
+
+# ----------------------
+# Externe modules (RAG)
+# ----------------------
 from augmented_generation.rag_chat import retrieve, build_context_blocks, make_messages
 from augmented_generation.providers.groq_client import chat as groq_chat
 
+# ----------------------
 # Config
+# ----------------------
 VECTORDB_DIR = Path(os.getenv("VECTORDB_DIR", "data/vectordb"))
-RAG_MODEL    = os.getenv("RAG_MODEL", "llama-3.3-70b-versatile")
-TOP_K        = int(os.getenv("RAG_TOPK", "5"))
+VECTORDB_DIR_STR = str(VECTORDB_DIR)
+RAG_MODEL = os.getenv("RAG_MODEL", "llama-3.3-70b-versatile")
+TOP_K = int(os.getenv("RAG_TOPK", "5"))
 
+# ----------------------
+# Flask app + Session
+# ----------------------
 app = Flask(__name__)
-app.config.update(
-    SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
-    SESSION_TYPE="filesystem",
-    SESSION_PERMANENT=False,
-    SESSION_FILE_DIR=str(Path("./.flask_session").resolve()),
-)
-Path("./.flask_session").mkdir(parents=True, exist_ok=True)
-Session(app)
 
-HTML = r"""
-<!doctype html>
+# Probeer server-side sessies; val terug op cookie-sessies als Flask-Session ontbreekt
+HAVE_FLASK_SESSION = False
+try:
+    from flask_session import Session
+
+    SESSION_DIR = Path(tempfile.gettempdir()) / "rag_apotheek_sessions"
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+
+    app.config.update(
+        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
+        SESSION_TYPE="filesystem",              # of 'redis' in productie
+        SESSION_PERMANENT=False,
+        SESSION_FILE_DIR=str(SESSION_DIR),
+        SESSION_USE_SIGNER=True,                # tekent de session-id cookie
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        # SESSION_COOKIE_SECURE=True,           # zet aan achter HTTPS
+    )
+    Session(app)
+    HAVE_FLASK_SESSION = True
+    print(f"[session] Filesystem sessions -> {SESSION_DIR}")
+except Exception as e:
+    app.config.update(
+        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
+    )
+    print(f"⚠️ Flask-Session niet actief ({e!s}). Vallen terug op cookie-sessies (±4KB limiet).")
+
+# ----------------------
+# Frontend (moderne dark UI – geïnspireerd op je voorbeeld, zonder logo)
+# ----------------------
+HTML = r"""<!doctype html>
 <html lang="nl">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RAG Apotheek Chatbot</title>
-<style>
-  :root{
-    --bg0:#05070d;
-    --bg1:#0b1220;
-    --bg2:#0a0f1a;
-    --ink:#dbe4ff;
-    --muted:#9fb0d0;
-    --brand:#2b5cff;
-    --brand-2:#0e1a3a;
-    --accent:#94b0ff;
-    --danger:#ff5c5c;
-    --ok:#2ee6a8;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%;}
-  body{
-    margin:0;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-    color:var(--ink);
-    background:
-      radial-gradient(1200px 600px at 80% -10%, #0f1a33 0%, transparent 60%),
-      radial-gradient(800px 400px at 10% 110%, #0a1633 0%, transparent 60%),
-      linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 60%, #000 100%);
-  }
-  .wrap{
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 24px 16px 80px;
-  }
-  .header{
-    position: sticky; top:0; z-index:10;
-    padding: 12px 16px;
-    margin: -24px -16px 16px;
-    background: linear-gradient(180deg, rgba(0,0,0,0.65), rgba(0,0,0,0.25));
-    backdrop-filter: blur(6px);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-  .title{
-    display:flex; align-items:center; gap:12px;
-    font-weight:700; letter-spacing:0.3px;
-  }
-  .dot{
-    width:12px; height:12px; border-radius:50%;
-    background: linear-gradient(135deg, var(--brand), var(--ok));
-    box-shadow: 0 0 18px rgba(43,92,255,0.6);
-  }
-  .meta{
-    color:var(--muted); font-size:13px;
-  }
-  .card{
-    background: linear-gradient(180deg, rgba(14,26,58,0.55), rgba(5,7,13,0.5));
-    border: 1px solid rgba(148,176,255,0.12);
-    border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-  form{
-    display:flex; gap:10px; align-items: stretch;
-    padding: 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-  input[type="text"]{
-    flex:1;
-    background: #0a1020;
-    border: 1px solid rgba(148,176,255,0.2);
-    color: var(--ink);
-    padding: 12px 14px;
-    border-radius: 10px;
-    outline:none;
-    transition: border .2s ease, box-shadow .2s ease;
-  }
-  input[type="text"]::placeholder{ color:#7f8eb0; }
-  input[type="text"]:focus{
-    border-color: var(--brand);
-    box-shadow: 0 0 0 3px rgba(43,92,255,0.25);
-  }
-  button{
-    background: linear-gradient(180deg, var(--brand), #2749c7);
-    color: white; border: none; padding: 12px 18px;
-    border-radius: 10px; font-weight:600; cursor:pointer;
-    box-shadow: 0 8px 20px rgba(43,92,255,0.35);
-  }
-  .danger{ background: linear-gradient(180deg, #d94848, #b33636); box-shadow: 0 8px 20px rgba(217,72,72,0.35);}
-  .row{ display:flex; gap: 12px; flex-wrap: wrap; align-items:center; }
-  .grow{ flex:1; }
-  .chat{
-    padding: 6px 14px 14px;
-    max-height: calc(100vh - 260px);
-    overflow: auto;
-  }
-  .msg{
-    display:flex; gap:10px; margin:14px 0;
-  }
-  .bubble{
-    padding:12px 14px; border-radius: 12px; line-height:1.5;
-    border:1px solid rgba(255,255,255,0.06);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-  .user .bubble{
-    background: #0f1b35; color: #e7ecff; border-color: rgba(148,176,255,0.18);
-  }
-  .bot .bubble{
-    background: #0b0f1a; color: #dbe4ff; border-color: rgba(148,176,255,0.14);
-  }
-  .sources{
-    margin-top:8px; font-size: 13px; color: var(--muted);
-    border-top:1px dashed rgba(148,176,255,0.18); padding-top:8px;
-  }
-  .badge{
-    display:inline-block; padding:2px 8px; border-radius:20px;
-    background: #0f1b35; color: #a8b8e8; border:1px solid rgba(148,176,255,0.2);
-    font-size:12px; margin-right:6px;
-  }
-  .footer{
-    margin-top:14px; font-size:12px; color:#91a1c5; text-align:center;
-  }
-  a{ color: var(--accent); text-decoration: none; }
-  a:hover{ text-decoration: underline; }
-</style>
-<script>
-  window.addEventListener('load', () => {
-    const box = document.querySelector('.chat');
-    if (box) box.scrollTop = box.scrollHeight;
-    const input = document.querySelector('#question');
-    if (input) input.focus();
-  });
-</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Apotheek.nl Chatbot</title>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      /* Donkere basis + blauwe accenten */
+      --bg-primary:#0f0f17;
+      --bg-secondary:#1a1a26;
+      --bg-tertiary:#252532;
+      --bg-accent:#2d2d3f;
+
+      --blue-primary:#1d4ed8;
+      --blue-secondary:#1e3a8a;
+      --blue-tertiary:#0f172a;
+      --blue-soft:#1e293b;
+      --blue-glow:rgba(29,78,216,0.15);
+
+      --text-primary:#f8fafc;
+      --text-secondary:#cbd5e1;
+      --text-muted:#94a3b8;
+      --text-accent:#e0e7ff;
+
+      --success:#10b981;
+      --success-bg:rgba(16,185,129,0.1);
+      --error:#ef4444;
+      --error-bg:rgba(239,68,68,0.1);
+      --info:#1d4ed8;
+      --info-bg:rgba(29,78,216,0.1);
+
+      --border-primary:#374151;
+      --shadow-sm:0 1px 3px rgba(0,0,0,.3);
+      --shadow-md:0 4px 12px rgba(0,0,0,.4);
+      --shadow-lg:0 10px 40px rgba(0,0,0,.6);
+
+      --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px;
+    }
+    *{box-sizing:border-box; margin:0; padding:0}
+    body{
+      font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color:var(--text-primary);
+      min-height:100vh; line-height:1.6; overflow-x:hidden;
+    }
+    body::before{
+      content:''; position:fixed; inset:0; z-index:-1;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(29,78,216,0.12) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(29,78,216,0.08) 0%, transparent 50%);
+      animation: float 20s ease-in-out infinite;
+    }
+    @keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-10px) rotate(1deg)}}
+
+    header{
+      background: rgba(26,26,38,.95);
+      backdrop-filter: blur(12px);
+      border-bottom:1px solid var(--border-primary);
+      padding:1rem 2rem; position:sticky; top:0; z-index:100; box-shadow: var(--shadow-md);
+    }
+    .header-content{
+      max-width:1200px; margin:0 auto; display:flex; align-items:center; gap:12px;
+    }
+    .brand-dot{
+      width:12px; height:12px; border-radius:50%;
+      background: linear-gradient(135deg, var(--blue-primary), var(--success));
+      box-shadow: 0 0 18px var(--blue-glow);
+    }
+    header h1{
+      font-size:1.35rem; font-weight:600;
+      background: linear-gradient(135deg, var(--text-primary) 0%, var(--blue-primary) 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+      letter-spacing:-.02em;
+    }
+
+    main{ max-width:1200px; margin:2rem auto; padding:0 2rem; }
+
+    .card{
+      background: var(--bg-tertiary);
+      border:1px solid var(--border-primary);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-lg); overflow:hidden; position:relative;
+    }
+    .card::before{ content:''; position:absolute; top:0; left:0; right:0; height:3px;
+      background: linear-gradient(90deg, var(--blue-primary), var(--blue-secondary)); }
+
+    .head{ background: linear-gradient(135deg, var(--bg-accent) 0%, var(--bg-tertiary) 100%);
+      padding:1.1rem 1.5rem; border-bottom:1px solid var(--border-primary); }
+    .head h2{ font-size:1.05rem; font-weight:600; color:var(--text-primary); }
+
+    .content{ padding:1rem 1.25rem 1.25rem; }
+
+    /* Meta bar */
+    .meta{
+      display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+      color:var(--text-muted); font-size:.9rem; margin-bottom:.75rem;
+    }
+    .badge{
+      display:inline-block; padding:2px 8px; border-radius:20px;
+      background: #0f1b35; color: #a8b8e8; border:1px solid rgba(148,176,255,0.2);
+      font-size:12px;
+    }
+
+    /* Form */
+    form{
+      display:flex; gap:10px; align-items: stretch;
+      padding: 12px; border-bottom: 1px solid var(--border-primary);
+      background: var(--bg-tertiary);
+    }
+    input[type="text"]{
+      flex:1; background: var(--blue-tertiary);
+      border: 2px solid transparent; color: var(--text-primary);
+      padding: 12px 14px; border-radius: 10px; outline:none;
+      transition: border .2s ease, box-shadow .2s ease;
+    }
+    input[type="text"]::placeholder{ color:#91a1c5; }
+    input[type="text"]:focus{
+      border-color: var(--blue-primary);
+      box-shadow: 0 0 0 3px rgba(29,78,216,0.18);
+      transform: translateY(-1px);
+    }
+    button{
+      appearance:none; border:none; border-radius:10px;
+      padding: 12px 16px; font-weight:600; cursor:pointer;
+      transition: all .2s ease; color:#fff;
+    }
+    .btn-primary{ background: linear-gradient(135deg, var(--blue-primary), var(--blue-secondary)); box-shadow: var(--shadow-sm); }
+    .btn-primary:hover{ transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .btn-danger{ background: linear-gradient(180deg, #d94848, #b33636); }
+
+    /* Chat */
+    .chat{
+      display:flex; flex-direction:column; gap:12px;
+      max-height: calc(100vh - 360px); overflow:auto; padding: 12px 12px 16px;
+      background: var(--blue-soft); border-top:1px solid var(--border-primary);
+    }
+    .msg{ display:flex; gap:10px; }
+    .bubble{
+      padding:12px 14px; border-radius: 12px; line-height:1.6;
+      border:1px solid rgba(255,255,255,0.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      background: var(--bg-secondary);
+    }
+    .user .bubble{ background: #0f1b35; border-color: rgba(148,176,255,0.18); }
+    .bot  .bubble{ background: #0b0f1a; border-color: rgba(148,176,255,0.14); }
+    .sources{
+      margin-top:8px; font-size: 13px; color: var(--text-muted);
+      border-top:1px dashed rgba(148,176,255,0.18); padding-top:8px;
+    }
+    .footer{
+      margin-top:14px; font-size:12px; color:#91a1c5; text-align:center;
+    }
+
+    a{ color: var(--text-accent); text-decoration: none; }
+    a:hover{ text-decoration: underline; }
+
+    @media (max-width: 768px){
+      main{ padding:0 1rem; margin:1rem auto; }
+      .chat{ max-height: unset; }
+      form{ flex-direction:column; }
+      button{ width:100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      *{ animation-duration:.01ms !important; transition-duration:.01ms !important; }
+      body::before{ animation:none; }
+    }
+  </style>
+
+  <script>
+    window.addEventListener('load', () => {
+      const box = document.querySelector('.chat');
+      if (box) box.scrollTop = box.scrollHeight;
+      const input = document.querySelector('#question');
+      if (input) input.focus();
+    });
+  </script>
 </head>
 <body>
-  <div class="wrap">
-    <div class="header">
-      <div class="row">
-        <div class="title"><div class="dot"></div> RAG Apotheek Chatbot</div>
-        <div class="grow"></div>
-        <div class="meta">
-          DB: <span class="badge">{{ db_dir }}</span>
-          Top-K: <span class="badge">{{ top_k }}</span>
-          Model: <span class="badge">{{ model }}</span>
+  <header>
+    <div class="header-content">
+      <div class="brand-dot" aria-hidden="true"></div>
+      <h1>Apotheek.nl Chatbot</h1>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="head">
+        <h2>Vraag en antwoord op basis van Apotheek.nl teksten</h2>
+      </div>
+
+      <div class="content">
+
+        <form method="post" action="{{ url_for('index') }}">
+          <input id="question" type="text" name="question"
+                 placeholder="Stel je vraag… (bijv. 'Wat zijn mogelijke bijwerkingen van metoprolol?')"
+                 autocomplete="off">
+          <button class="btn-primary" type="submit">Vraag</button>
+          <a href="{{ url_for('clear') }}"><button class="btn-danger" type="button">Leeg chat</button></a>
+        </form>
+
+        <div class="chat">
+          {% if not chat %}
+            <div class="bot msg">
+              <div class="bubble">
+                <strong>Welkom!</strong> Stel je geneesmiddelvraag. Ik weet op dit moment alles over paracetamol, ibuprofen, metoprolol, candesartan, amitriptyline, venlafaxine, metformine, omeprazol, amlodipine, atorvastatine, amoxicilline en salbutamol.
+              </div>
+            </div>
+          {% endif %}
+
+          {% for turn in chat %}
+            <div class="user msg">
+              <div class="bubble">{{ turn.q | e }}</div>
+            </div>
+            <div class="bot msg">
+              <div class="bubble">
+                {{ turn.a | replace('\n','<br>') | safe }}
+                {% if turn.sources %}
+                <div class="sources">
+                  <div><strong>Bronnen:</strong></div>
+                  <ul style="margin:6px 0 0 18px; padding:0;">
+                  {% for s in turn.sources %}
+                    <li>
+                      [{{ s.id }}]
+                      {{ s.place | e }}
+                      {% if s.url %}
+                        — <a href="{{ s.url }}" target="_blank" rel="noopener">link</a>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                  </ul>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <form method="post" action="{{ url_for('index') }}">
-        <input id="question" type="text" name="question" placeholder="Stel je vraag… (bijv. 'Wanneer mag ik ibuprofen gebruiken tijdens zwangerschap?')" autocomplete="off">
-        <button type="submit">Vraag</button>
-        <a href="{{ url_for('clear') }}"><button type="button" class="danger">Leeg chat</button></a>
-      </form>
-
-      <div class="chat">
-        {% if not chat %}
-          <div class="bot msg">
-            <div class="bubble">
-              <strong>Welkom!</strong> Stel je geneesmiddelvraag. Ik antwoord op basis van je lokale FAISS-database (apotheek.nl).
-            </div>
-          </div>
-        {% endif %}
-        {% for turn in chat %}
-          <div class="user msg">
-            <div class="bubble">{{ turn.q | e }}</div>
-          </div>
-          <div class="bot msg">
-            <div class="bubble">
-              {{ turn.a | replace('\n','<br>') | safe }}
-              {% if turn.sources %}
-              <div class="sources">
-                <div><strong>Bronnen:</strong></div>
-                <ul style="margin:6px 0 0 18px; padding:0;">
-                {% for s in turn.sources %}
-                  <li>
-                    [{{ s.id }}]
-                    {{ s.place | e }}
-                    {% if s.url %}
-                      — <a href="{{ s.url }}" target="_blank" rel="noopener">link</a>
-                    {% endif %}
-                  </li>
-                {% endfor %}
-                </ul>
-              </div>
-              {% endif %}
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="footer">
-      Made with Flask · FAISS · Groq · SentenceTransformers · Dark Navy UI
-    </div>
-  </div>
+  </main>
 </body>
 </html>
 """
 
-def _pick_sources_from_answer(hits: List[Tuple[float, Dict]], answer: str):
-    used = []
-    for i in range(1, len(hits)+1):
-        if f"[{i}]" in answer:
-            used.append(i)
-    if not used:
-        used = list(range(1, min(4, len(hits))+1))
-    out = []
-    for i in used:
-        _, m = hits[i-1]
-        place = f"{m.get('title','')} > {m.get('section','')}"
-        if m.get("subsection"):
-            place += f" > {m['subsection']}"
-        url = m.get("url") or m.get("source_file") or ""
-        out.append({"id": i, "place": place, "url": url})
-    return out
+# ----------------------
+# Helpers
+# ----------------------
+def _canon_url(url: str) -> str | None:
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        p = urlparse(url)
+        if not p.scheme or not p.netloc:
+            return None
+        path = (p.path or "/").rstrip("/") or "/"
+        return urlunparse((p.scheme.lower(), p.netloc.lower(), path, "", "", ""))
+    except Exception:
+        return None
 
+def build_sources_from_hits(hits: List[Tuple[float, Dict]]) -> List[Dict]:
+    """
+    Bouw een unieke bronnenlijst op basis van de top-k hits.
+    Dedupliceer op canonieke URL; valt terug op (title, section, subsection) als URL ontbreekt.
+    Nummer de zichtbare bronnen 1..N (onafhankelijk van hit-index).
+    """
+    seen = set()
+    sources = []
+    next_id = 1
+
+    for _, m in hits:
+        url = m.get("url") or m.get("source_file") or ""
+        cu = _canon_url(url)
+        key = cu or ( (m.get("title","") or "").strip(),
+                      (m.get("section","") or "").strip(),
+                      (m.get("subsection") or "").strip() )
+        if key in seen:
+            continue
+        seen.add(key)
+
+        title = (m.get("title","") or "").strip()
+        section = (m.get("section","") or "").strip()
+        subsection = (m.get("subsection") or "").strip()
+        place = f"{title} > {section}" + (f" > {subsection}" if subsection else "")
+
+        sources.append({"id": next_id, "place": place, "url": cu or url})
+        next_id += 1
+
+    return sources
+
+# ----------------------
+# Routes
+# ----------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     chat = session.get("chat", [])
@@ -288,20 +409,28 @@ def index():
                     ctx_blocks = build_context_blocks(hits)
                     messages   = make_messages(question, ctx_blocks)
                     answer     = groq_chat(messages, model=RAG_MODEL, max_tokens=700, temperature=0.2, stream=False)
-                    sources    = _pick_sources_from_answer(hits, answer)
+                    sources = build_sources_from_hits(hits)
             except Exception as e:
                 answer = f"Er ging iets mis: {e}"
                 sources = []
-            chat.append({"q": question, "a": answer, "sources": sources})
+
+            # Voeg toe aan chat; cap om cookies te voorkomen als fallback actief is
+            if not HAVE_FLASK_SESSION:
+                MAX_ANS_CHARS = 1500
+                if len(answer) > MAX_ANS_CHARS:
+                    answer = answer[:MAX_ANS_CHARS] + "…"
+                chat.append({"q": question, "a": answer, "sources": sources})
+                chat = chat[-6:]  # bewaar alleen laatste 6 turns
+            else:
+                chat.append({"q": question, "a": answer, "sources": sources})
+                chat = chat[-20:] # royale, server-side
+
             session["chat"] = chat
         return redirect(url_for("index"))
 
     return render_template_string(
         HTML,
         chat=chat,
-        db_dir=str(VECTORDB_DIR),
-        top_k=TOP_K,
-        model=RAG_MODEL,
     )
 
 @app.route("/clear")
@@ -313,6 +442,9 @@ def clear():
 def healthz():
     return {"ok": True, "db": str(VECTORDB_DIR), "top_k": TOP_K, "model": RAG_MODEL}
 
+# ----------------------
+# Main
+# ----------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="127.0.0.1", port=port, debug=True)

@@ -41,21 +41,26 @@ def build_context_blocks(hits: List[Tuple[float, Dict]]) -> List[str]:
     return blocks
 
 def make_messages(question: str, context_blocks: List[str]) -> List[Dict[str, str]]:
+    """
+    Prompt die GEEN inline citaties en GEEN 'Bronnen:'-regel laat genereren.
+    De applicatie toont zelf de bronnenlijst onder het antwoord.
+    """
     context = "\n\n".join(context_blocks)
     system = (
-        "Je bent een assistent die antwoorden geeft over geneesmiddelen op basis van de meegeleverde bronnen. "
-        "Antwoord in het Nederlands, helder en kort maar volledig. Gebruik uitsluitend de context; verzin niets. "
-        "Noem concrete doseringen/contra-indicaties alleen als die expliciet in de context staan. "
-        "Sluit af met 'Bronnen: [1], [2], ...' met de juiste nummers. Als informatie ontbreekt: zeg dat."
+        "Je bent een assistent die antwoorden geeft over geneesmiddelen op basis van meegeleverde context. "
+        "Gebruik uitsluitend die context; verzin niets. Antwoord beknopt, helder en feitelijk in het Nederlands. "
+        "Noem doseringen/contra-indicaties alleen als die expliciet in de context staan. "
+        "BELANGRIJK: plaats GEEN inline verwijzingen ([1], [2], e.d.) en voeg GEEN bronnen- of referentieblok toe. "
+        "Schrijf uitsluitend het antwoord in lopende tekst."
     )
     user = (
         f"VRAAG:\n{question}\n\n"
-        "CONTEXT (genummerde passages):\n"
+        "CONTEXT (passages, eventueel genummerd door het systeem):\n"
         f"{context}\n\n"
         "INSTRUCTIES:\n"
-        "- Baseer je antwoord uitsluitend op de passages hierboven.\n"
-        "- Verwijs met [n] naar relevante passages.\n"
-        "- Eindig met: 'Bronnen: [x], [y], ...'."
+        "- Beantwoord uitsluitend op basis van de context.\n"
+        "- Schrijf alleen het antwoord; voeg GEEN citaties of 'Bronnen:'-regel toe.\n"
+        "- Als informatie ontbreekt, zeg dat expliciet."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
