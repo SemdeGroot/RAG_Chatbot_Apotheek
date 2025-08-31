@@ -1,0 +1,5 @@
+{
+  "model_name": "intfloat/multilingual-e5-base",
+  "metric": "cosine",
+  "count": 1591
+}

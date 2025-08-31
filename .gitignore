@@ -32,10 +32,8 @@ Thumbs.db
 # --- Project data (niet committen) ---
 data/raw_html/
 data/clean_json/
-data/vectordb/
 data/cache/
 data/logs/
-*.faiss
 *.jsonl
 
 # Laat placeholders in repo toe
