@@ -63,31 +63,20 @@ TOP_K = int(os.getenv("RAG_TOPK", "5"))
 app = Flask(__name__)
 
 # Probeer server-side sessies; val terug op cookie-sessies als Flask-Session ontbreekt
-HAVE_FLASK_SESSION = False
-try:
-    from flask_session import Session
+IN_SPACES = os.getenv("SPACE_ID") or os.getenv("HF_SPACE")  # aanwezig op HF
+SAMESITE  = "None" if IN_SPACES else "Lax"
+SECURE    = True   if IN_SPACES else False
 
-    SESSION_DIR = Path(tempfile.gettempdir()) / "rag_apotheek_sessions"
-    SESSION_DIR.mkdir(parents=True, exist_ok=True)
-
-    app.config.update(
-        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
-        SESSION_TYPE="filesystem",              # of 'redis' in productie
-        SESSION_PERMANENT=False,
-        SESSION_FILE_DIR=str(SESSION_DIR),
-        SESSION_USE_SIGNER=True,                # tekent de session-id cookie
-        SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE="Lax",
-        # SESSION_COOKIE_SECURE=True,           # zet aan achter HTTPS
-    )
-    Session(app)
-    HAVE_FLASK_SESSION = True
-    print(f"[session] Filesystem sessions -> {SESSION_DIR}")
-except Exception as e:
-    app.config.update(
-        SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
-    )
-    print(f"⚠️ Flask-Session niet actief ({e!s}). Vallen terug op cookie-sessies (±4KB limiet).")
+app.config.update(
+    SECRET_KEY=os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me"),
+    SESSION_TYPE="filesystem",
+    SESSION_PERMANENT=False,
+    SESSION_FILE_DIR=str(SESSION_DIR),
+    SESSION_USE_SIGNER=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=SAMESITE,
+    SESSION_COOKIE_SECURE=SECURE,
+)
 
 # ----------------------
 # Frontend (moderne dark UI – geïnspireerd op je voorbeeld, zonder logo)
