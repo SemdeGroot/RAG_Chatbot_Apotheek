@@ -216,13 +216,13 @@ HTML = r"""<!doctype html>
     form{
       display:flex; gap:10px; align-items: stretch;
       padding: 12px; border-bottom: 1px solid var(--border-primary);
-      background: var(--bg-tertiary);
+      background: var(--bg-tertiary); position: relative;
     }
     input[type="text"]{
       flex:1; background: var(--blue-tertiary);
       border: 2px solid transparent; color: var(--text-primary);
       padding: 12px 14px; border-radius: 10px; outline:none;
-      transition: border .2s ease, box-shadow .2s ease;
+      transition: border .2s ease, box-shadow .2s ease, transform .1s ease;
     }
     input[type="text"]::placeholder{ color:#91a1c5; }
     input[type="text"]:focus{
@@ -230,14 +230,53 @@ HTML = r"""<!doctype html>
       box-shadow: 0 0 0 3px rgba(29,78,216,0.18);
       transform: translateY(-1px);
     }
+    input[type="text"]:disabled{
+      opacity: 0.6; cursor: not-allowed;
+    }
     button{
       appearance:none; border:none; border-radius:10px;
       padding: 12px 16px; font-weight:600; cursor:pointer;
-      transition: all .2s ease; color:#fff;
+      transition: all .2s ease; color:#fff; position: relative; overflow: hidden;
     }
-    .btn-primary{ background: linear-gradient(135deg, var(--blue-primary), var(--blue-secondary)); box-shadow: var(--shadow-sm); }
-    .btn-primary:hover{ transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .btn-primary{ 
+      background: linear-gradient(135deg, var(--blue-primary), var(--blue-secondary)); 
+      box-shadow: var(--shadow-sm); 
+    }
+    .btn-primary:hover:not(:disabled){ 
+      transform: translateY(-1px); 
+      box-shadow: var(--shadow-md); 
+    }
+    .btn-primary:disabled{
+      opacity: 0.7; cursor: not-allowed; transform: none;
+    }
     .btn-danger{ background: linear-gradient(180deg, #d94848, #b33636); }
+
+    /* Loading states */
+    .loading-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 15, 23, 0.9);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      border-radius: 10px;
+    }
+    .loading-overlay.active {
+      display: flex;
+    }
+    .spinner {
+      width: 24px; height: 24px;
+      border: 3px solid rgba(29, 78, 216, 0.2);
+      border-top: 3px solid var(--blue-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
 
     /* Chat */
     .chat{
@@ -245,14 +284,73 @@ HTML = r"""<!doctype html>
       max-height: calc(100vh - 360px); overflow:auto; padding: 12px 12px 16px;
       background: var(--blue-soft); border-top:1px solid var(--border-primary);
     }
-    .msg{ display:flex; gap:10px; }
+    .msg{ 
+      display:flex; gap:10px; 
+      opacity: 0;
+      animation: fadeInUp 0.4s ease forwards;
+    }
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
     .bubble{
       padding:12px 14px; border-radius: 12px; line-height:1.6;
       border:1px solid rgba(255,255,255,0.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
       background: var(--bg-secondary);
+      transition: all 0.2s ease;
+    }
+    .bubble:hover {
+      transform: translateY(-1px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 12px rgba(0,0,0,.3);
     }
     .user .bubble{ background: #0f1b35; border-color: rgba(148,176,255,0.18); }
     .bot  .bubble{ background: #0b0f1a; border-color: rgba(148,176,255,0.14); }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: none;
+      padding: 12px 14px;
+      background: #0b0f1a;
+      border: 1px solid rgba(148,176,255,0.14);
+      border-radius: 12px;
+      margin: 12px 0;
+    }
+    .typing-indicator.active {
+      display: block;
+      animation: fadeInUp 0.4s ease forwards;
+    }
+    .typing-dots {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .typing-dots span {
+      width: 8px;
+      height: 8px;
+      background: var(--blue-primary);
+      border-radius: 50%;
+      animation: typingDot 1.4s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(1) { animation-delay: 0s; }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingDot {
+      0%, 60%, 100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+      }
+      30% {
+        transform: scale(1.2);
+        opacity: 1;
+      }
+    }
+
     .sources{
       margin-top:8px; font-size: 13px; color: var(--text-muted);
       border-top:1px dashed rgba(148,176,255,0.18); padding-top:8px;
@@ -264,29 +362,177 @@ HTML = r"""<!doctype html>
     a{ color: var(--text-accent); text-decoration: none; }
     a:hover{ text-decoration: underline; }
 
+    /* Verbeterde button states */
+    .btn-primary::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: width 0.3s ease, height 0.3s ease;
+    }
+    .btn-primary:active::before {
+      width: 100px;
+      height: 100px;
+    }
+
+    /* Status indicator */
+    .status-indicator {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px 12px;
+      background: var(--success-bg);
+      border: 1px solid var(--success);
+      border-radius: 8px;
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 500;
+      opacity: 0;
+      transform: translateY(-20px);
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+    .status-indicator.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .status-indicator.processing {
+      background: var(--info-bg);
+      border-color: var(--info);
+      color: var(--info);
+    }
+    .status-indicator.error {
+      background: var(--error-bg);
+      border-color: var(--error);
+      color: var(--error);
+    }
+
     @media (max-width: 768px){
       main{ padding:0 1rem; margin:1rem auto; }
       .chat{ max-height: unset; }
       form{ flex-direction:column; }
       button{ width:100%; }
+      .status-indicator {
+        top: 10px;
+        right: 10px;
+        font-size: 11px;
+      }
     }
 
     @media (prefers-reduced-motion: reduce){
       *{ animation-duration:.01ms !important; transition-duration:.01ms !important; }
       body::before{ animation:none; }
+      .msg { animation: none; opacity: 1; }
+      .typing-dots span { animation: none; }
     }
   </style>
 
-  <script>
-    window.addEventListener('load', () => {
-      const box = document.querySelector('.chat');
-      if (box) box.scrollTop = box.scrollHeight;
-      const input = document.querySelector('#question');
-      if (input) input.focus();
+<script>
+  let isProcessing = false;
+
+  function showStatus(message, type = 'success') {
+    const indicator = document.getElementById('status-indicator');
+    if (!indicator) return;
+    indicator.textContent = message;
+    indicator.className = `status-indicator ${type} show`;
+    setTimeout(() => indicator.classList.remove('show'), 3000);
+  }
+
+  function scrollToBottom() {
+    const chat = document.querySelector('.chat');
+    if (chat) setTimeout(() => (chat.scrollTop = chat.scrollHeight), 50);
+  }
+
+  function setFormState(loading) {
+    isProcessing = loading;
+    const input = document.querySelector('#question');
+    const submitBtn = document.querySelector('.btn-primary');
+    const overlay = document.querySelector('.loading-overlay');
+    if (submitBtn) {
+      submitBtn.disabled = loading;
+      submitBtn.textContent = loading ? 'Bezig...' : 'Vraag';
+    }
+    // LET OP: input pas na body-build disablen (zie handler)
+    if (overlay) overlay.classList.toggle('active', loading);
+  }
+
+  window.addEventListener('load', () => {
+    const form = document.querySelector('form');
+    const input = document.querySelector('#question');
+    const chatBox = document.querySelector('.chat');
+    const typing = document.getElementById('typing-indicator');
+
+    if (input) input.focus();
+    scrollToBottom();
+
+    if (!form || !input || !chatBox) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const q = input.value.trim();
+      if (!q || isProcessing) return;
+
+      // 1) Body opbouwen vóórdat we velden disablen
+      //    (disabled inputs worden niet meegestuurd!)
+      const body = new URLSearchParams();
+      body.set('question', q);
+
+      // 2) Nu pas UI op "loading"
+      setFormState(true);
+      input.disabled = true;
+      if (typing) typing.classList.add('active');
+
+      try {
+        const resp = await fetch(form.action, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                     'Accept': 'text/html' },
+          body
+        });
+        if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
+
+        const html = await resp.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const newChat = doc.querySelector('.chat');
+        if (newChat) {
+          chatBox.innerHTML = newChat.innerHTML;
+          input.value = '';
+          showStatus('Antwoord ontvangen', 'success');
+        } else {
+          showStatus('Kon chatweergave niet bijwerken', 'error');
+        }
+      } catch (err) {
+        console.error(err);
+        showStatus('Fout: ' + (err?.message || err), 'error');
+      } finally {
+        if (typing) typing.classList.remove('active');
+        input.disabled = false;
+        setFormState(false);
+        input.focus();
+        scrollToBottom();
+      }
     });
-  </script>
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        form.dispatchEvent(new Event('submit', { cancelable: true }));
+      }
+    });
+  });
+</script>
+
 </head>
 <body>
+  <!-- Status indicator -->
+  <div id="status-indicator" class="status-indicator"></div>
+
   <header>
     <div class="header-content">
       <div class="brand-dot" aria-hidden="true"></div>
@@ -308,6 +554,11 @@ HTML = r"""<!doctype html>
                  autocomplete="off">
           <button class="btn-primary" type="submit">Vraag</button>
           <a href="{{ url_for('clear') }}"><button class="btn-danger" type="button">Leeg chat</button></a>
+          
+          <!-- Loading overlay voor form -->
+          <div class="loading-overlay">
+            <div class="spinner"></div>
+          </div>
         </form>
 
         <div class="chat">
@@ -345,6 +596,15 @@ HTML = r"""<!doctype html>
               </div>
             </div>
           {% endfor %}
+
+          <!-- Typing indicator -->
+          <div id="typing-indicator" class="typing-indicator">
+            <div class="typing-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
