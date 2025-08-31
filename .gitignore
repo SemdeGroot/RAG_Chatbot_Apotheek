@@ -34,7 +34,6 @@ data/raw_html/
 data/clean_json/
 data/cache/
 data/logs/
-*.jsonl
 
 # Laat placeholders in repo toe
 !data/**/.gitkeep
