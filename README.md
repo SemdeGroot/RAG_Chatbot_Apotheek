@@ -7,6 +7,12 @@ sdk: docker
 pinned: false
 ---
 
-# Apotheek Chatbot (RAG)
+# Pharmacy Chatbot (RAG)
 
-Een lichte **Flask** webapp die met **FAISS** + **Sentence Transformers** relevante passages uit enkele *apotheek.nl* teksten (lokaal geparseerd) ophaalt en via **Groq LLM** een beknopt NL-antwoord geeft. Ontworpen als Proof of Concept.
+This repository contains the code for a proof-of-concept Retrieval-Augmented Generation (RAG) pharmacy chatbot, built on a small subset of texts from **Apotheek.nl**.  
+The project is currently **under development** and has been made publicly available as part of my master’s program admission.  
+
+## Live Demo
+
+Try it out here:  
+- [Live demo](https://semdegroot-apotheek-chatbot.hf.space/)  
